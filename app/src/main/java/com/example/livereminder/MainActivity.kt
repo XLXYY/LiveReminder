@@ -19,6 +19,7 @@ import com.example.livereminder.db.AppDatabase
 import com.example.livereminder.db.FollowedRoomEntity
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -129,11 +130,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshAll() {
         lifecycleScope.launch {
-            val rooms = withContext(Dispatchers.IO) { db.followedRoomDao().getAllRooms() }
-            rooms.collect { list ->
-                for (room in list) {
-                    refreshRoom(room)
-                }
+            // 使用一次性查询，避免无限收集
+            val list = withContext(Dispatchers.IO) {
+                db.followedRoomDao().getAllRoomsOnce()
+            }
+            for (room in list) {
+                refreshRoom(room)
             }
         }
     }
@@ -148,33 +150,33 @@ class MainActivity : AppCompatActivity() {
         val lvTimes = view.findViewById<ListView>(R.id.lv_times)
 
         val times = ScheduleManager.getTimes(this).toMutableList()
-        val adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, times)
-        lvTimes.adapter = adapter
+        val listAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, times)
+        lvTimes.adapter = listAdapter
 
         switchEnabled.isChecked = ScheduleManager.isEnabled(this)
-        switchEnabled.setOnCheckedChangeListener { _, isChecked ->
-            ScheduleManager.setEnabled(this, isChecked)
+        switchEnabled.setOnCheckedChangeListener { _: CompoundButton, isChecked: Boolean ->
+            ScheduleManager.setEnabled(this@MainActivity, isChecked)
         }
 
         btnAddTime.setOnClickListener {
             val cal = java.util.Calendar.getInstance()
-            TimePickerDialog(this, { _, hour, minute ->
-                ScheduleManager.addTime(this, hour, minute)
+            TimePickerDialog(this@MainActivity, { _: TimePicker, hour: Int, minute: Int ->
+                ScheduleManager.addTime(this@MainActivity, hour, minute)
                 times.clear()
-                times.addAll(ScheduleManager.getTimes(this))
-                adapter.notifyDataSetChanged()
+                times.addAll(ScheduleManager.getTimes(this@MainActivity))
+                listAdapter.notifyDataSetChanged()
             }, cal.get(java.util.Calendar.HOUR_OF_DAY), cal.get(java.util.Calendar.MINUTE), true).show()
         }
 
-        lvTimes.setOnItemLongClickListener { _, _, position, _ ->
-            AlertDialog.Builder(this)
+        lvTimes.setOnItemLongClickListener { _: AdapterView<*>, _: View, position: Int, _: Long ->
+            AlertDialog.Builder(this@MainActivity)
                 .setMessage("删除此时间点？")
                 .setPositiveButton("确定") { _, _ ->
                     val timeStr = times[position]
-                    ScheduleManager.removeTime(this, timeStr)
+                    ScheduleManager.removeTime(this@MainActivity, timeStr)
                     times.clear()
-                    times.addAll(ScheduleManager.getTimes(this))
-                    adapter.notifyDataSetChanged()
+                    times.addAll(ScheduleManager.getTimes(this@MainActivity))
+                    listAdapter.notifyDataSetChanged()
                 }
                 .setNegativeButton("取消", null)
                 .show()
