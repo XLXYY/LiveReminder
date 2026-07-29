@@ -9,25 +9,26 @@ import java.net.URL
 object LiveChecker {
 
     data class RoomInfo(val roomId: Long, val uname: String, val liveStatus: Int)
+
     data class CheckResult(
         val roomInfo: RoomInfo?,
-        val errorMsg: String? = null  // 为 null 表示成功
+        val errorMsg: String? = null
     )
 
     /**
-     * 检测直播间信息，返回更详细的结果
+     * 返回详细的结果对象，方便上层展示具体错误
      */
     suspend fun getRoomInfoWithResult(inputId: Long): CheckResult = withContext(Dispatchers.IO) {
         try {
-            // 优先尝试主 API
-            var result = requestApi("https://api.live.bilibili.com/room/v1/Room/get_info?room_id=$inputId")
+            // 优先用这个新接口，返回稳定、无需 cookie，且字段明确
+            var result = requestGetInfoByRoom(inputId)
             if (result != null) return@withContext result
 
-            // 主 API 失败，尝试备用 API
-            result = requestApi("https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id=$inputId")
+            // 新接口失败，尝试旧接口
+            result = requestGetInfo(inputId)
             if (result != null) return@withContext result
 
-            CheckResult(null, "房间不存在或网络错误（请检查电视联网）")
+            CheckResult(null, "无法连接到 B 站 API，请检查网络或稍后重试")
         } catch (e: Exception) {
             e.printStackTrace()
             CheckResult(null, "网络异常: ${e.localizedMessage ?: "未知错误"}")
@@ -35,52 +36,78 @@ object LiveChecker {
     }
 
     /**
-     * 兼容旧版调用（返回 RoomInfo?）
+     * 兼容旧版调用，只返回 RoomInfo
      */
     suspend fun getRoomInfo(inputId: Long): RoomInfo? {
-        val result = getRoomInfoWithResult(inputId)
-        return result.roomInfo
+        return getRoomInfoWithResult(inputId).roomInfo
     }
 
-    private fun requestApi(urlStr: String): CheckResult? {
+    // 新接口：xlive/web-room/v1/index/getInfoByRoom
+    private fun requestGetInfoByRoom(roomId: Long): CheckResult? {
         var conn: HttpURLConnection? = null
         try {
-            val url = URL(urlStr)
+            val url = URL("https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id=$roomId")
             conn = url.openConnection() as HttpURLConnection
             conn.requestMethod = "GET"
             conn.connectTimeout = 8000
             conn.readTimeout = 8000
-            conn.setRequestProperty("User-Agent", "Mozilla/5.0") // 模拟浏览器
+            // 模拟浏览器请求头，防止被拒
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            conn.setRequestProperty("Referer", "https://live.bilibili.com/")
 
             if (conn.responseCode == 200) {
                 val json = conn.inputStream.bufferedReader().readText()
                 val obj = JSONObject(json)
                 val code = obj.getInt("code")
                 if (code != 0) {
-                    // B 站返回的错误信息
                     val msg = obj.optString("message", "未知错误")
-                    return CheckResult(null, "B站接口返回: $msg")
+                    return CheckResult(null, "B站接口返回错误: $msg")
                 }
+                val data = obj.getJSONObject("data")
+                val roomInfoObj = data.getJSONObject("room_info")
+                val realRoomId = roomInfoObj.getLong("room_id")
+                val uname = roomInfoObj.getString("uname")
+                val liveStatus = roomInfoObj.getInt("live_status")
+                return CheckResult(RoomInfo(realRoomId, uname, liveStatus))
+            } else {
+                return CheckResult(null, "服务器响应异常: ${conn.responseCode}")
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        } finally {
+            conn?.disconnect()
+        }
+        return null
+    }
 
-                // 尝试从主 API 格式解析
-                var data = obj.optJSONObject("data")
-                if (data != null) {
-                    val roomInfo = data.optJSONObject("room_info")
-                    if (roomInfo != null) {
-                        val realRoomId = roomInfo.getLong("room_id")
-                        val uname = roomInfo.getString("uname")
-                        val liveStatus = roomInfo.getInt("live_status")
-                        return CheckResult(RoomInfo(realRoomId, uname, liveStatus))
-                    }
+    // 旧接口：room/v1/Room/get_info，作为备选
+    private fun requestGetInfo(roomId: Long): CheckResult? {
+        var conn: HttpURLConnection? = null
+        try {
+            val url = URL("https://api.live.bilibili.com/room/v1/Room/get_info?room_id=$roomId")
+            conn = url.openConnection() as HttpURLConnection
+            conn.requestMethod = "GET"
+            conn.connectTimeout = 8000
+            conn.readTimeout = 8000
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            conn.setRequestProperty("Referer", "https://live.bilibili.com/")
 
-                    // 备用 API 格式：可能字段不同
-                    val realRoomId = data.optLong("room_id", 0)
-                    val uname = data.optString("uname", "")
-                    val liveStatus = data.optInt("live_status", 0)
-                    if (realRoomId != 0L && uname.isNotEmpty()) {
-                        return CheckResult(RoomInfo(realRoomId, uname, liveStatus))
-                    }
+            if (conn.responseCode == 200) {
+                val json = conn.inputStream.bufferedReader().readText()
+                val obj = JSONObject(json)
+                val code = obj.getInt("code")
+                if (code != 0) {
+                    val msg = obj.optString("message", "未知错误")
+                    return CheckResult(null, "B站接口返回错误: $msg")
                 }
+                val data = obj.getJSONObject("data")
+                val roomInfo = data.getJSONObject("room_info")
+                val realRoomId = roomInfo.getLong("room_id")
+                val uname = roomInfo.getString("uname")
+                val liveStatus = roomInfo.getInt("live_status")
+                return CheckResult(RoomInfo(realRoomId, uname, liveStatus))
+            } else {
+                return CheckResult(null, "服务器响应异常: ${conn.responseCode}")
             }
         } catch (e: Exception) {
             e.printStackTrace()
