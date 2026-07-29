@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="pink_start">#FF7EB3</color>
+    <color name="blue_end">#7EC8E3</color>
+    <color name="card_glass">#B3FFFFFF</color>
+    <color name="text_dark">#333333</color>
+    <color name="text_live">#4CAF50</color>
+    <color name="text_offline">#9E9E9E</color>
+</resources>
