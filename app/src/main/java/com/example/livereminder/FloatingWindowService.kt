@@ -50,25 +50,20 @@ class FloatingWindowService : Service() {
     private fun checkAndShow() {
         scope.launch {
             val dao = AppDatabase.getInstance(this@FloatingWindowService).followedRoomDao()
-            val rooms = withContext(Dispatchers.IO) { dao.getAllRooms() }
+            val rooms = withContext(Dispatchers.IO) { dao.getAllRoomsOnce() }
             val liveRooms = mutableListOf<FollowedRoomEntity>()
-            // 暂存当前列表，用于检测新开播
-            val currentEntities = rooms.toList()
 
-            for (room in currentEntities) {
+            for (room in rooms) {
                 val info = LiveChecker.getRoomInfo(room.roomId)
                 if (info != null) {
-                    // 更新数据库状态
                     withContext(Dispatchers.IO) {
                         dao.updateLiveStatus(room.roomId, info.liveStatus)
                     }
-                    // 判断是否新开播（上次未直播，这次直播）
                     val wasOffline = room.liveStatus == 0
                     val isNowLive = info.liveStatus == 1
                     if (wasOffline && isNowLive) {
                         liveRooms.add(room.copy(liveStatus = 1))
                     } else if (isNowLive) {
-                        // 已经在直播但未显示过浮窗？我们可以选择每次都把所有直播展示
                         liveRooms.add(room.copy(liveStatus = 1))
                     }
                 }
