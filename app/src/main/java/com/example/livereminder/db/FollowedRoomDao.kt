@@ -8,6 +8,10 @@ interface FollowedRoomDao {
     @Query("SELECT * FROM followed_rooms ORDER BY addedTime DESC")
     fun getAllRooms(): Flow<List<FollowedRoomEntity>>
 
+    // 新增：用于单次获取列表（不返回 Flow）
+    @Query("SELECT * FROM followed_rooms ORDER BY addedTime DESC")
+    suspend fun getAllRoomsOnce(): List<FollowedRoomEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertRoom(room: FollowedRoomEntity)
 
